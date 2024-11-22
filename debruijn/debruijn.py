@@ -98,11 +98,21 @@ def get_arguments():  # pragma: no cover
 
 def read_fastq(fastq_file: Path) -> Iterator[str]:
     """Extract reads from fastq files.
-
+    
     :param fastq_file: (Path) Path to the fastq file.
     :return: A generator object that iterate the read sequences.
     """
-    pass
+    
+    "rt = mode de lecture read texte"
+    with open(fastq_file, "rt") as fastq:
+        for i, line in enumerate(fastq):
+            if i % 4 == 1:
+                yield line.strip()
+                "yield permet de ne pas renvoyer tout d'un coup"
+            
+            
+
+
 
 
 def cut_kmer(read: str, kmer_size: int) -> Iterator[str]:
@@ -111,7 +121,9 @@ def cut_kmer(read: str, kmer_size: int) -> Iterator[str]:
     :param read: (str) Sequence of a read.
     :return: A generator object that provides the kmers (str) of size kmer_size.
     """
-    pass
+    for i in range(len(read) - kmer_size + 1):
+        yield read[i:i + kmer_size]
+
 
 
 def build_kmer_dict(fastq_file: Path, kmer_size: int) -> Dict[str, int]:
@@ -120,7 +132,12 @@ def build_kmer_dict(fastq_file: Path, kmer_size: int) -> Dict[str, int]:
     :param fastq_file: (str) Path to the fastq file.
     :return: A dictionnary object that identify all kmer occurrences.
     """
-    pass
+    kmer_dict = {}
+    for reads in read_fastq(fastq_file):
+        for kmer in cut_kmer(reads, kmer_size):
+            kmer_dict[kmer] = kmer_dict.get(kmer, 0) + 1
+    return kmer_dict
+    
 
 
 def build_graph(kmer_dict: Dict[str, int]) -> DiGraph:
@@ -129,8 +146,14 @@ def build_graph(kmer_dict: Dict[str, int]) -> DiGraph:
     :param kmer_dict: A dictionnary object that identify all kmer occurrences.
     :return: A directed graph (nx) of all kmer substring and weight (occurrence).
     """
-    pass
-
+    debruijn_graph = DiGraph()
+    
+    for kmer, weight in kmer_dict.items():
+        prefix = kmer[:-1]
+        suffix = kmer[1:]
+        debruijn_graph.add_edge(prefix, suffix, weight=weight)
+    
+    return debruijn_graph
 
 def remove_paths(
     graph: DiGraph,
@@ -147,8 +170,14 @@ def remove_paths(
     :param delete_sink_node: (boolean) True->We remove the last node of a path
     :return: (nx.DiGraph) A directed graph object
     """
-    pass
-
+    for path in path_list:
+        if delete_entry_node:
+            graph.remove_node(path[0])
+        if delete_sink_node:
+            graph.remove_node(path[-1])
+        graph.remove_nodes_from(path[1:-1])
+    
+    return graph
 
 def select_best_path(
     graph: DiGraph,
@@ -168,9 +197,20 @@ def select_best_path(
     :param delete_sink_node: (boolean) True->We remove the last node of a path
     :return: (nx.DiGraph) A directed graph object
     """
-    pass
+    paths_data = sorted(
+        zip(path_list, path_length, weight_avg_list),
+        key=lambda x: (-x[2], -x[1], x[0])
+    )
 
+    best_path = paths_data[0][0]
+    
+    paths_to_remove = [path for path, _, _ in paths_data[1:]]
+    
+    graph = remove_paths(graph, paths_to_remove, delete_entry_node, delete_sink_node)
 
+    return graph
+    
+    
 def path_average_weight(graph: DiGraph, path: List[str]) -> float:
     """Compute the weight of a path
 
@@ -191,7 +231,16 @@ def solve_bubble(graph: DiGraph, ancestor_node: str, descendant_node: str) -> Di
     :param descendant_node: (str) A downstream node in the graph
     :return: (nx.DiGraph) A directed graph object
     """
-    pass
+    paths = list(all_simple_paths(graph, source=ancestor_node, target=descendant_node))
+    
+    # Calculate path lengths and average weights
+    path_lengths = [len(path) for path in paths]
+    weight_avgs = [sum(graph[u][v]['weight'] for u, v in zip(path[:-1], path[1:])) / (len(path) - 1) for path in paths]
+    
+    # Select the best path if there are multiple paths
+    graph = (lambda g: select_best_path(g, paths, path_lengths, weight_avgs))(graph) if len(paths) > 1 else graph
+    
+    return graph
 
 
 def simplify_bubbles(graph: DiGraph) -> DiGraph:
